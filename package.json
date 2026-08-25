@@ -1,0 +1,27 @@
+{
+  "name": "rag-assistant",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/genai": "^2.18.0",
+    "and": "^0.0.3",
+    "dotenv": "^17.4.2",
+    "groq-sdk": "^1.5.0",
+    "pg": "^8.23.0",
+    "pgvector": "^0.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}

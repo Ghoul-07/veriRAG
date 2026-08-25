@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+package-lock.json.bak
+
+# Environment variables & secrets (CRITICAL: keeps your API keys private)
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Logs & debugging
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local cache & temporary files
+.cache/
+tmp/
+temp/
