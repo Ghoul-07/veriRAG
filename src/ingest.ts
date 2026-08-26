@@ -3,7 +3,6 @@ import fs from 'fs'
 import path from 'path'
 import pg from 'pg'
 import { GoogleGenAI } from '@google/genai'
-import { text } from 'stream/consumers'
 
 const {Pool} = pg
 const pool = new Pool({connectionString:process.env.DATABASE_URL})
@@ -24,7 +23,7 @@ interface DocumentChunk{
 /**
  * Splits text cleanly by paragraphs and markdown sections, ensuring no mid-word slicing.
  */
-function chunkText(text: string, maxChunkLength = 500, overlapSentences = 1): string[] {
+export function chunkText(text: string, maxChunkLength = 500): string[] {
   const paragraphs = text
     .replace(/\r\n/g, '\n')
     .split(/\n\n+/)
@@ -56,7 +55,7 @@ function chunkText(text: string, maxChunkLength = 500, overlapSentences = 1): st
  * Generates a 768-dimension vector using Gemini embeddings.
  */
 
-async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(text: string): Promise<number[]> {
   const response = await ai.models.embedContent({
     model:'gemini-embedding-001',
     contents: text,
@@ -78,12 +77,10 @@ async function generateEmbedding(text: string): Promise<number[]> {
  * Main ingestion routine: processes files and inserts vectors into pgvector.
  */
 
-async function ingestFile(filePath: string){
-  const fileName = path.basename(filePath)
+export async function ingestDocument(fileName: string, rawContent: string): Promise<number>{
   console.log(`\n📄 Ingesting document: ${fileName}`);
-
-  const rawContent = fs.readFileSync(filePath, 'utf-8')
-  const textChunks = chunkText(rawContent, CHUNK_SIZE, CHUNK_OVERLAP)
+  
+  const textChunks = chunkText(rawContent, CHUNK_SIZE)
   console.log(`✂️  Split into ${textChunks.length} chunks.`);
 
   const client = await pool.connect()
@@ -112,17 +109,38 @@ async function ingestFile(filePath: string){
         chunk,
         JSON.stringify(embedding)
       ])
+
+      // Small pacing delay
+      await new Promise((r) => setTimeout(r, 100));
+
       console.log(`✅ Successfully ingested all ${textChunks.length} chunks into pgvector!`);
+      return textChunks.length
     }
   }finally{
     client.release()
   }
 }
 
+/**
+ * Ingest directly from a local file path.
+ */
+export async function ingestFile(filePath: string): Promise<number> {
+  const fileName = path.basename(filePath);
+  const rawContent = fs.readFileSync(filePath, 'utf-8');
+  return ingestDocument(fileName, rawContent);
+}
+
+// CLI runner support: Accepts optional file path as CLI argument
 async function run() {
+  const targetPath = process.argv[2] || path.join(process.cwd(), 'data', 'sample-docs.md');
+
+  if (!fs.existsSync(targetPath)) {
+    console.error(`❌ File not found at: ${targetPath}`);
+    process.exit(1);
+  }
+
   try {
-    const sampleFilePath = path.join(process.cwd(), 'data', 'sample-docs.md');
-    await ingestFile(sampleFilePath);
+    await ingestFile(targetPath);
   } catch (error) {
     console.error('❌ Ingestion failed:', error);
   } finally {
@@ -130,4 +148,7 @@ async function run() {
   }
 }
 
-run();
+// Execute only if run directly from terminal
+if (process.argv[1] && process.argv[1].endsWith('ingest.ts')) {
+  run();
+}
