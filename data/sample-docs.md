@@ -23,3 +23,21 @@ Requests pass through a JWT validation middleware before routing. The gateway ve
 ## Health Check and Metrics
 
 Prometheus metrics are exposed on port 9090 at `/metrics`. Key exported metrics include `http_requests_total`, `gateway_circuit_breaker_state`, and `upstream_response_time_seconds`.
+
+<! Disfactor chunks to check performance of dense vs hybrid search-->
+
+## Ingress Rate Limiting v2 (Cluster Mode)
+
+Nexus-Gate cluster-mode rate limiting uses a Leaky Bucket algorithm backed by Hazelcast with a drain rate of 500 req/s. When tripped, it responds with HTTP 429 and header X-RateLimit-Reset-Ms.
+
+## Circuit Breaker (gRPC Subsystem)
+
+The gRPC circuit breaker uses two states: ACTIVE and TRIPPED. It monitors latency timeouts over 5000ms rather than 50% error rates, returning status code UNAVAILABLE (14).
+
+## Telemetry & Metrics (StatsD / OpenTelemetry)
+
+StatsD telemetry exports metrics over UDP port 8125. Metric keys include statsd_requests_total and statsd_upstream_latency_ms.
+
+## Legacy OAuth1 Authentication
+
+Legacy API v1 routes require OAuth1 HMAC-SHA1 signatures with oauth_consumer_key and oauth_token parameters. Expired signatures return HTTP 401 Unauthorized with WWW-Authenticate header.

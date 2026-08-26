@@ -178,5 +178,61 @@
     "groundTruthAnswer": "I cannot answer this question based on the provided documentation.",
     "intentType": "informational",
     "expectedAction": false
+  },
+  {
+    "id": "TC-KEYWORD-01",
+    "query": "gateway_circuit_breaker_state",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_5"],
+    "groundTruthAnswer": "Prometheus metric exported on port 9090.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-KEYWORD-02",
+    "query": "Retry-After",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_1"],
+    "groundTruthAnswer": "Returned on HTTP 429 Token Bucket exhaustion.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-KEYWORD-03",
+    "query": "HS256 sub role exp",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_4"],
+    "groundTruthAnswer": "JWT authentication signature and claims.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  
+  {
+    "id": "TC-KEYWORD-04",
+    "query": "Why is the network connection failing on port 8125 when transmitting UDP telemetry packets?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_8"],
+    "groundTruthAnswer": "StatsD telemetry exports metrics over UDP port 8125.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-KEYWORD-05",
+    "query": "How do I fix client credentials failing with oauth_consumer_key signature verification?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_9"],
+    "groundTruthAnswer": "Legacy OAuth1 routes require HMAC-SHA1 signatures with oauth_consumer_key and oauth_token.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-KEYWORD-06",
+    "query": "What causes the system to enter the TRIPPED state with error code UNAVAILABLE (14)?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_7"],
+    "groundTruthAnswer": "The gRPC circuit breaker enters TRIPPED when latency exceeds 5000ms, returning UNAVAILABLE (14).",
+    "intentType": "informational",
+    "expectedAction": false
   }
+
 ]
