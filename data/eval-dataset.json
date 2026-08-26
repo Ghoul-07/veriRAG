@@ -1,0 +1,182 @@
+[
+  {
+    "id": "TC-01",
+    "query": "What rate limiting algorithm does Nexus-Gate use and what is the refill rate?",
+    "category": "semantic",
+    "expectedChunkIds": ["sample-docs.md_chunk_1"],
+    "groundTruthAnswer": "Nexus-Gate uses a distributed Token Bucket algorithm backed by Redis with a refill rate of 100 tokens per minute and a burst capacity of 200 tokens.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-02",
+    "query": "What HTTP status code and header are returned when a client exceeds rate limits?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_1"],
+    "groundTruthAnswer": "HTTP 429 Too Many Requests with a Retry-After header.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-03",
+    "query": "What are the 3 states of the circuit breaker?",
+    "category": "semantic",
+    "expectedChunkIds": ["sample-docs.md_chunk_2", "sample-docs.md_chunk_3"],
+    "groundTruthAnswer": "The three states are CLOSED, OPEN, and HALF-OPEN.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-04",
+    "query": "Under what error rate threshold does the circuit breaker trip to OPEN?",
+    "category": "semantic",
+    "expectedChunkIds": ["sample-docs.md_chunk_3"],
+    "groundTruthAnswer": "If downstream error rates exceed 50% over a 10-second rolling window.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-05",
+    "query": "How long is the circuit breaker cooldown timeout before entering HALF-OPEN?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_3"],
+    "groundTruthAnswer": "A 30-second cooldown timeout.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-06",
+    "query": "How many canary probe requests are permitted in the HALF-OPEN state?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_3"],
+    "groundTruthAnswer": "5 canary probe requests.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-07",
+    "query": "What algorithm and claim structure are required for JWT authentication?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_4"],
+    "groundTruthAnswer": "HMAC-SHA256 (HS256) signature with sub, role, and exp claims.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-08",
+    "query": "What happens when an incoming request has an expired JWT token?",
+    "category": "semantic",
+    "expectedChunkIds": ["sample-docs.md_chunk_4"],
+    "groundTruthAnswer": "The request is rejected with HTTP 401 Unauthorized.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-09",
+    "query": "On what port and path are Prometheus metrics exposed?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_5"],
+    "groundTruthAnswer": "Port 9090 at the /metrics endpoint.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-10",
+    "query": "List all exported Prometheus metric names.",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_5"],
+    "groundTruthAnswer": "http_requests_total, gateway_circuit_breaker_state, and upstream_response_time_seconds.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-11",
+    "query": "What password hashing algorithm does the authentication service use?",
+    "category": "out_of_scope",
+    "expectedChunkIds": [],
+    "groundTruthAnswer": "I cannot answer this question based on the provided documentation.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-12",
+    "query": "How do I deploy Nexus-Gate onto a Kubernetes cluster with Helm charts?",
+    "category": "out_of_scope",
+    "expectedChunkIds": [],
+    "groundTruthAnswer": "I cannot answer this question based on the provided documentation.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-13",
+    "query": "What is the maximum allowed payload size for POST requests in nginx?",
+    "category": "out_of_scope",
+    "expectedChunkIds": [],
+    "groundTruthAnswer": "I cannot answer this question based on the provided documentation.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-14",
+    "query": "What database holds user profile credentials and email addresses?",
+    "category": "out_of_scope",
+    "expectedChunkIds": [],
+    "groundTruthAnswer": "I cannot answer this question based on the provided documentation.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-15",
+    "query": "File an issue: Downstream service returning 503 errors during open circuit state.",
+    "category": "action",
+    "expectedChunkIds": ["sample-docs.md_chunk_3"],
+    "groundTruthAnswer": "Draft GitHub issue detailing HTTP 503 fail-fast behavior when circuit breaker trips to OPEN due to >50% error rates.",
+    "intentType": "action_draft_issue",
+    "expectedAction": true
+  },
+  {
+    "id": "TC-16",
+    "query": "Create a bug report for Prometheus metrics endpoint failing on port 9090.",
+    "category": "action",
+    "expectedChunkIds": ["sample-docs.md_chunk_5"],
+    "groundTruthAnswer": "Draft GitHub issue reporting metrics scrape failure on port 9090 at /metrics.",
+    "intentType": "action_draft_issue",
+    "expectedAction": true
+  },
+  {
+    "id": "TC-17",
+    "query": "File a ticket to upgrade MySQL database connection pool to 50 connections.",
+    "category": "out_of_scope",
+    "expectedChunkIds": [],
+    "groundTruthAnswer": "I cannot answer this question based on the provided documentation.",
+    "intentType": "action_draft_issue",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-18",
+    "query": "What HTTP status code indicates insufficient role privileges in JWT auth?",
+    "category": "keyword",
+    "expectedChunkIds": ["sample-docs.md_chunk_4"],
+    "groundTruthAnswer": "HTTP 403 Forbidden.",
+    "intentType": "informational",
+    "expectedAction": false
+  },
+  {
+    "id": "TC-19",
+    "query": "Draft an issue regarding Redis rate limiter token replenishment delays.",
+    "category": "action",
+    "expectedChunkIds": ["sample-docs.md_chunk_1"],
+    "groundTruthAnswer": "Draft GitHub issue regarding Token Bucket refill rate of 100 tokens per minute backed by Redis.",
+    "intentType": "action_draft_issue",
+    "expectedAction": true
+  },
+  {
+    "id": "TC-20",
+    "query": "What is the secret key used to sign JWT tokens?",
+    "category": "out_of_scope",
+    "expectedChunkIds": [],
+    "groundTruthAnswer": "I cannot answer this question based on the provided documentation.",
+    "intentType": "informational",
+    "expectedAction": false
+  }
+]
