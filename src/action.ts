@@ -179,7 +179,8 @@ export async function executeGatedAction(query:string): Promise<void>{
 
 // Test runner for direct execution
 async function run() {
-  const query = 'File an issue: Downstream service returning 503 errors during open circuit state.';
+  const cliArgs = process.argv.slice(2).join(' ').trim();
+  const query = cliArgs || 'File an issue: Downstream service returning 503 errors during open circuit state.';
   
   console.log(`🚀 Testing Action Pipeline for: "${query}"\n`);
   await executeGatedAction(query);
