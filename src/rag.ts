@@ -1,19 +1,19 @@
 // ============================================================================
-// END-TO-END RAG PIPELINE
+// VERIRAG VERIFIED PIPELINE (Hybrid Retrieval + Self-Correction Judge)
 // ============================================================================
-// Connects vector retrieval with Groq LLM inference to generate
-// grounded answers with source citations.
 
 import 'dotenv/config'
 import Groq from 'groq-sdk'
 import { vectorSearch, SearchResult } from './retrieve.js'
+import { EvaluationResult, evaluateFaithfulness } from './judge.js'
 
 const groq = new Groq({apiKey: process.env.GROQ_API_KEY})
 
-interface RagResponse{
+interface VerifiedRagResponse{
   query: string;
   answer: string;
-  sources: { id: string; document: string; similarity: string }[];
+  sources: { id: string; document: string; score: string }[];
+  verification: EvaluationResult
 }
 
 /**
@@ -42,7 +42,7 @@ ${query}
  * Runs the complete RAG pipeline for a given query.
  */
 
-export async function askQuestion(query: string, topK=3):Promise<RagResponse>{
+export async function askQuestion(query: string, topK=3):Promise<VerifiedRagResponse>{
   // 1. Retrieve the most relevant chunks from postgres
   const retrievedChunks = await vectorSearch(query, topK)
 
@@ -50,7 +50,13 @@ export async function askQuestion(query: string, topK=3):Promise<RagResponse>{
     return {
       query,
       answer: 'No relevant context found in database.',
-      sources:[]
+      sources:[],
+      verification:{
+        isFaithful: false,
+        confidenceScore: 0.0,
+        unsupportedClaims: [],
+        reasoning: 'No context was found; correctly flagged as empty'
+      }
     }
   }
 
@@ -73,31 +79,50 @@ export async function askQuestion(query: string, topK=3):Promise<RagResponse>{
     temperature: 0.1, // Low temperature for high factual accuracy
   })
 
-  const answer = completion.choices[0]?.message?.content || 'No response generated'
+  const rawAnswer = completion.choices[0]?.message?.content || 'No response generated'
+
+  // 4. Automated Faithfulness Verification (LLM Judge)
+  console.log('⚖️  Running automated verification judge on generated response...');
+
+  const verification = await evaluateFaithfulness(query, retrievedChunks, rawAnswer)
+
+  let finalAnswer = rawAnswer
+  if(!verification.isFaithful){
+    finalAnswer = `⚠️ [Verification Warning]: The generated answer failed faithfulness checks. \nReason: ${verification.reasoning}`;
+  }
 
   return {
     query,
-    answer,
+    answer: finalAnswer,
     sources: retrievedChunks.map((c)=>({
       id: c.id,
       document: c.documentName,
-      similarity: `${(c.similarity * 100).toFixed(2)}%`,
-    }))
+      score: `${(c.score * 100).toFixed(2)}%`,
+    })),
+    verification
   }
 }
 
 // Direct test execution
 async function run() {
-  const query = 'How does the circuit breaker handle cooldown and recover?';
+  const query = 'What algorithm does the gateway use for password hashing?';
   console.log(`🤖 Asking VeriRAG: "${query}"\n`);
 
   try {
-    const response = await askQuestion(query, 3);
+    const response = await askQuestion(query, 2);
 
-    console.log('====================================================');
+    console.log('\n====================================================');
     console.log('💬 ANSWER:');
     console.log('====================================================');
     console.log(response.answer);
+
+    console.log('\n====================================================');
+    console.log('⚖️ VERIFICATION REPORT:');
+    console.log('====================================================');
+    console.log(`Status:      ${response.verification.isFaithful ? '✅ PASS' : '❌ FAIL'}`);
+    console.log(`Confidence:  ${(response.verification.confidenceScore * 100).toFixed(0)}%`);
+    console.log(`Reasoning:   ${response.verification.reasoning}`);
+
     console.log('\n====================================================');
     console.log('📚 SOURCES USED:');
     console.log('====================================================');
