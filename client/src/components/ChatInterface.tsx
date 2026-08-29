@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { ActionModal } from './ActionModal';
 import ReactMarkdown from 'react-markdown';
-import { Send, ShieldCheck, ShieldAlert, Sparkles, Loader2, Database } from 'lucide-react';
+import { Send, ShieldCheck, ShieldAlert, Loader2, Database } from 'lucide-react';
 
 interface Source {
   id: string;
@@ -33,6 +34,9 @@ export const ChatInterface: React.FC = () => {
     },
   ]);
 
+  const [modalData, setModalData] = useState<any>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -53,6 +57,26 @@ export const ChatInterface: React.FC = () => {
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
     try {
+      const isActionQuery = /^(create|open|file|submit|report|draft)\b/i.test(query);
+
+      if (isActionQuery) {
+        const draftRes = await fetch(`${BACKEND_URL}/api/v1/action/draft`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query }),
+        });
+
+        if (draftRes.ok) {
+          const draftData = await draftRes.json();
+          if (draftData.isAction) {
+            setModalData(draftData);
+            setIsModalOpen(true);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
       const response = await fetch(`${BACKEND_URL}/api/v1/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -110,11 +134,13 @@ export const ChatInterface: React.FC = () => {
 
               {/* Judge Gate Verification Banner */}
               {msg.verification && (
-                <div className={`mt-3.5 pt-3 border-t text-xs rounded-lg p-3 ${
-                  msg.verification.isFaithful
-                    ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300'
-                    : 'bg-rose-950/30 border-rose-800/50 text-rose-300'
-                }`}>
+                <div
+                  className={`mt-3.5 pt-3 border-t text-xs rounded-lg p-3 ${
+                    msg.verification.isFaithful
+                      ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300'
+                      : 'bg-rose-950/30 border-rose-800/50 text-rose-300'
+                  }`}
+                >
                   <div className="flex items-center gap-1.5 font-semibold">
                     {msg.verification.isFaithful ? (
                       <>
@@ -180,6 +206,25 @@ export const ChatInterface: React.FC = () => {
           <Send className="w-4 h-4" />
         </button>
       </form>
+
+      {modalData && (
+        <ActionModal
+          isOpen={isModalOpen}
+          status={modalData.status}
+          draft={modalData.draft}
+          verification={modalData.verification}
+          onClose={() => setIsModalOpen(false)}
+          onExecuted={(url) => {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'assistant',
+                content: `✅ **Action Dispatched:** Created GitHub issue successfully: [${url}](${url})`,
+              },
+            ]);
+          }}
+        />
+      )}
     </div>
   );
 };
