@@ -1,10 +1,18 @@
 import { useState } from 'react';
 import { DocumentUpload } from './components/DocumentUpload';
 import { ChatInterface } from './components/ChatInterface';
+import { DocumentDrawer } from './components/DocumentDrawer';
 import { Shield } from 'lucide-react';
 
 export default function App() {
   const [recentUpload, setRecentUpload] = useState<{ filename: string; count: number } | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [refreshCount, setRefreshCount] = useState(0)
+
+  // Trigger when a new upload succeeds
+  const handleUploadSuccess = () => {
+    setRefreshCount((prev) => prev + 1);
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center py-10 px-4">
@@ -25,6 +33,14 @@ export default function App() {
               Synced: {recentUpload.filename} ({recentUpload.count} chunks)
             </span>
           )}
+
+          {/* Open Drawer Button */}
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+        >
+          <span>Manage Documents</span>
+        </button>
         </header>
 
         {/* Upload Box */}
@@ -32,6 +48,13 @@ export default function App() {
 
         {/* Chat Interface */}
         <ChatInterface />
+
+        {/* Document Management Drawer */}
+        <DocumentDrawer
+          isOpen={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          refreshTrigger={refreshCount}
+        />
       </div>
     </div>
   );

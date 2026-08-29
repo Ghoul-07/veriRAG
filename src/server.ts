@@ -8,8 +8,8 @@ import { askQuestion } from './rag.js'
 import { hybridSearch } from './retrieve.js'
 import { classifyAndDraftAction, dispatchGitHubIssue } from './action.js'
 import { evaluateFaithfulness } from './judge.js'
+import { listIndexedDocuments, deleteDocumentChunks } from './ingest.js'
 import pg from 'pg'
-import { error } from 'node:console'
 
 const { Pool } = pg
 const pool = new Pool({connectionString:process.env.DATABASE_URL})
@@ -41,7 +41,6 @@ app.post('/api/v1/upload', upload.single('file'), async(req:Request, res:Respons
   try{
     let content = ''
     let filename = 'pasted-text.md'
-
 
     // Case A: uploaded via form
     if(req.file){
@@ -139,7 +138,7 @@ app.post('/api/v1/action/draft', async (req: Request, res:Response) : Promise<vo
   }
 })
 
-// 2. Dispatch human-approved action to GitHub
+// 5. Dispatch human-approved action to GitHub
 app.post('/api/v1/action/execute', async (req: Request, res: Response): Promise<void> => {
   try {
     const { title, body, labels } = req.body;
@@ -155,6 +154,57 @@ app.post('/api/v1/action/execute', async (req: Request, res: Response): Promise<
     res.status(500).json({ error: 'Failed to execute action', details: err.message });
   }
 });
+
+// ============================================================================
+// DOCUMENT MANAGEMENT ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /api/v1/documents
+ * Fetches all unique documents stored in pgvector along with their chunk counts.
+ */
+app.get('/api/v1/documents', async(req: Request, res:Response)=>{
+  try {
+    const documents = await listIndexedDocuments();
+    res.status(200).json({ success: true, count: documents.length, documents });
+  } catch (err: any) {
+    console.error('Error fetching document list:', err);
+    res.status(500).json({ error: 'Failed to retrieve documents', details: err.message });
+  }
+})
+
+/**
+ * DELETE /api/v1/documents/:documentName
+ * Deletes a document and all of its chunks/vectors from the database.
+ */
+
+app.delete('/api/v1/documents/:documentName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const documentName = req.params.documentName as string;
+
+    if (!documentName || typeof documentName !== 'string') {
+      res.status(400).json({ error: 'Document name parameter is required.' });
+      return;
+    }
+
+    const deletedChunks = await deleteDocumentChunks(documentName);
+
+    if (deletedChunks === 0) {
+      res.status(404).json({ error: `Document "${documentName}" not found.` });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully deleted document "${documentName}" and its ${deletedChunks} chunks.`,
+      deletedChunks,
+    });
+  } catch (err: any) {
+    console.error('Error deleting document:', err);
+    res.status(500).json({ error: 'Failed to delete document', details: err.message });
+  }
+});
+
 
 app.listen(PORT, ()=>{
   console.log(`🚀 VeriRAG Backend Server listening on http://localhost:${PORT}`);

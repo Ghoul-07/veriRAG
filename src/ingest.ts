@@ -1,3 +1,7 @@
+// ============================================================================
+// VERIRAG INGESTION LAYER (Chunking, Embedding & Document Management)
+// ============================================================================
+
 import 'dotenv/config'
 import fs from 'fs'
 import path from 'path'
@@ -10,14 +14,10 @@ const ai = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY})
 
 // configuration for sliding window chunking
 const CHUNK_SIZE = 400   // approximate character count per chunk
-const CHUNK_OVERLAP = 80 // overlap to preserve context across boundaries
 
-interface DocumentChunk{
-  id: string,
+export interface DocumentSummary{
   documentName: string,
-  chunkIndex: number,
-  content: string,
-  embedding: number[]
+  chunkCount: number
 }
 
 /**
@@ -112,13 +112,44 @@ export async function ingestDocument(fileName: string, rawContent: string): Prom
 
       // Small pacing delay
       await new Promise((r) => setTimeout(r, 100));
-
-      console.log(`✅ Successfully ingested all ${textChunks.length} chunks into pgvector!`);
-      return textChunks.length
     }
+
+    console.log(`✅ Successfully ingested all ${textChunks.length} chunks into pgvector!`);
+    return textChunks.length
+    
   }finally{
     client.release()
   }
+}
+
+/**
+ * Lists all indexed documents grouped by document_name with total chunk counts.
+ */
+
+export async function listIndexedDocuments() : Promise<DocumentSummary[]>{
+  const query = `
+    SELECT 
+      document_name as documentname,
+      COUNT(*):: int as chunkcount
+    FROM document_chunks
+    WHERE document_name IS NOT NULL
+    GROUP BY document_name
+    ORDER BY document_name
+  `
+  const result = await pool.query(query)
+  return result.rows
+}
+
+/**
+ * Deletes all chunks and vector embeddings belonging to a specific document.
+ */
+export async function deleteDocumentChunks(documentName: string): Promise<number>{
+  const query = `
+    DELETE FROM document_chunks
+    WHERE document_name = $1
+  `
+  const result = await pool.query(query, [documentName])
+  return result.rowCount || 0
 }
 
 /**
