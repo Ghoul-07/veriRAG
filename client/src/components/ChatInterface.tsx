@@ -83,7 +83,6 @@ export const ChatInterface: React.FC = () => {
       }
 
       // 2. Standard Query Flow with Token Streaming via SSE
-      const assistantMessageIndex = messages.length + 1;
 
       setMessages((prev) => [
         ...prev,
@@ -96,8 +95,15 @@ export const ChatInterface: React.FC = () => {
         },
       ]);
 
+      const conversationHistory = messages.
+        slice(1).     // skip initial welcome prompt
+        filter((m) => m.content && !m.content.startsWith('⚠️')).
+        slice(-4).
+        map((m) => ({role:m.role, content: m.content}))
+
+      const encodedHistory = encodeURIComponent(JSON.stringify(conversationHistory))
       const response = await fetch(
-        `${BACKEND_URL}/api/v1/query/stream?prompt=${encodeURIComponent(query)}`
+        `${BACKEND_URL}/api/v1/query/stream?prompt=${encodeURIComponent(query)}&history=${encodedHistory}`
       );
 
       if (!response.ok || !response.body) {
