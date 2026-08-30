@@ -1,13 +1,16 @@
 import 'dotenv/config'
+import path from 'path'
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
-import type { Request, Response } from 'express'
-import { chunkText, ingestDocument } from './ingest.js'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
+import type { Request, Response, NextFunction } from 'express'
+import { ingestDocument } from './ingest.js'
 import { askQuestion } from './rag.js'
 import { hybridSearch } from './retrieve.js'
 import { classifyAndDraftAction, dispatchGitHubIssue } from './action.js'
-import { evaluateFaithfulness , evaluateActionFaithfulness} from './judge.js'
+import { evaluateActionFaithfulness} from './judge.js'
 import { listIndexedDocuments, deleteDocumentChunks } from './ingest.js'
 import { streamAnswer } from './retrieve.js'
 import pg from 'pg'
@@ -16,10 +19,71 @@ const { Pool } = pg
 const pool = new Pool({connectionString:process.env.DATABASE_URL})
 
 const app = express()
-const upload = multer({storage:multer.memoryStorage() }) // In-memory file buffer
 
-app.use(cors())
-app.use(express.json())
+
+// 1. Security Headers
+app.use(helmet({ contentSecurityPolicy: false }));
+
+// 2. CORS
+const allowedOrigins = [
+  process.env.FRONTEND_URL
+].filter(Boolean)
+
+app.use(cors({
+  origin: (origin, callback) =>{
+    if(!origin || allowedOrigins.includes(origin)){
+      callback(null, true)
+    }
+    else{
+      callback(new Error('Blocked by CORS policy: Origin unauthorized.'))
+    }
+  },
+  credentials:true
+}))
+app.use(express.json({limit:'2mb'}))
+
+
+// 3. rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Rate limit exceeded. Please wait a moment before sending more queries.' }
+})
+
+
+// 4. File upload bounds & filter
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  fileFilter: (_req, file, cb) => {
+    const allowedExts = ['.txt', '.md', '.json', '.pdf'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedExts.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Unsupported file type (${ext}). Allowed: .txt, .md, .json, .pdf`));
+    }
+  },
+});
+
+// 5. Global Error Handler for Multer & Edge Cases
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      res.status(400).json({ error: 'File size exceeds 10MB limit.' });
+      return;
+    }
+    res.status(400).json({ error: `Upload error: ${err.message}` });
+    return;
+  }
+  if (err) {
+    res.status(500).json({ error: err.message || 'Internal server error.' });
+    return;
+  }
+});
 
 const PORT = process.env.PORT || 3000
 
@@ -80,7 +144,7 @@ app.post('/api/v1/upload', upload.single('file'), async(req:Request, res:Respons
 // 3. QUERY ENDPOINT
 // ----------------------------------------------------------------------------
 
-app.post('/api/v1/query', async(req:Request, res:Response)=>{
+app.post('/api/v1/query', apiLimiter,async(req:Request, res:Response)=>{
   try{
     const {query, topK=3} = req.body
     if(!query){
@@ -140,7 +204,7 @@ app.post('/api/v1/action/draft', async (req: Request, res:Response) : Promise<vo
 })
 
 // 5. Dispatch human-approved action to GitHub
-app.post('/api/v1/action/execute', async (req: Request, res: Response): Promise<void> => {
+app.post('/api/v1/action/execute', apiLimiter,async (req: Request, res: Response): Promise<void> => {
   try {
     const { title, body, labels } = req.body;
     if (!title || !body) {
@@ -218,12 +282,21 @@ app.delete('/api/v1/documents/:documentName', async (req: Request, res: Response
 
 app.get('/api/v1/query/stream', async (req: Request, res:Response): Promise<void> => {
   const prompt = req.query.prompt as string
+  const historyRaw = req.query.history as string
 
   if (!prompt || typeof prompt !== 'string') {
     res.status(400).json({ error: 'A query parameter "prompt" is required.' });
     return;
   }
 
+  let parsedHistory = []
+  if(historyRaw){
+    try{
+      parsedHistory = JSON.parse(decodeURIComponent(historyRaw))
+    }catch{
+      parsedHistory = []
+    }
+  }
   // Set SSE Headers
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -235,7 +308,7 @@ app.get('/api/v1/query/stream', async (req: Request, res:Response): Promise<void
   }
 
   try {
-    const result = await streamAnswer(prompt, (tokenText: string) => {
+    const result = await streamAnswer(prompt, parsedHistory ,(tokenText: string) => {
       sendSSE('token', { token: tokenText });
     });
 

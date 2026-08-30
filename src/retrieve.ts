@@ -8,11 +8,13 @@ import pg from 'pg'
 import 'dotenv/config'
 import { GoogleGenAI } from '@google/genai'
 import { evaluateFaithfulness } from './judge.js'
-import { chunkText } from './ingest.js'
+import Groq from 'groq-sdk'
 
 const { Pool } = pg
 const pool = new Pool({connectionString: process.env.DATABASE_URL})
+
 const ai = new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY})
+const groq = new Groq({apiKey:process.env.GROQ_API_KEY})
 
 export interface SearchResult{
   id:string, 
@@ -26,6 +28,56 @@ export interface StreamResult {
   fullAnswer: string,
   sources: SearchResult[],
   judgeVerdict:any
+}
+
+export interface ChatTurn{
+  role: 'user' | 'assistant',
+  content: string
+}
+
+/**
+ * Rewrites a follow-up question using chat history into a standalone query.
+ */
+
+export async function contextualizeQuery(query: string, history: ChatTurn[]): Promise<string>{
+
+  if(!history || history.length === 0) return query
+
+  // take the last 4 turns 
+  const recentHistory = history.slice(-4)
+  const formattedHistory = recentHistory
+    .map((turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content}`)
+    .join('\n');
+
+ try {
+    const completion = await groq.chat.completions.create({
+      model: 'openai/gpt-oss-120b',
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an automated query contextualizer for technical documentation search.
+          Given the previous conversation and the follow-up question, resolve all ambiguous pronouns (like "it", "its", "they", "this") using the exact entity or topic discussed in the latest turn.
+
+          Rules:
+          1. Output ONLY the standalone search query.
+          2. Do NOT add conversational replies, markdown, or explanations.
+          3. If the user question is already self-contained, return it verbatim.`,
+        },
+        {
+          role: 'user',
+          content: `--- CHAT HISTORY ---\n${formattedHistory}\n--------------------\n\nFollow-up Question: ${query}\n\nStandalone Search Query:`,
+        },
+      ],
+    });
+
+    const rewritten = completion.choices[0]?.message?.content?.trim();
+    console.log(`\n🔄 [Query Rewriter] "${query}" ➔ "${rewritten}"`);
+    return rewritten && rewritten.length > 0 ? rewritten : query;
+  } catch (err) {
+    console.warn('⚠️ Query rewriter failed, falling back to original query:', err);
+    return query;
+  }
 }
 
 /**
@@ -88,37 +140,62 @@ export async function vectorSearch(query: string, topK= 5): Promise<SearchResult
  * 2. SPARSE KEYWORD SEARCH (PostgreSQL tsvector / GIN Full-Text Search)
  */
 
-export async function keywordSearch(query:string, topK=8): Promise<SearchResult[]>{
-  const client = await pool.connect()
+/**
+ * 2. SPARSE KEYWORD SEARCH (Tokenized ILIKE + Full-Text Search)
+ */
+export async function keywordSearch(query: string, topK = 8): Promise<SearchResult[]> {
+  const client = await pool.connect();
 
-  try{
+  try {
+    // Extract key tokens, ignoring punctuation and common stop words
+    const cleanTokens = query
+      .replace(/[^a-zA-Z0-9\s-]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !['what', 'how', 'why', 'when', 'the', 'are', 'its', 'for', 'with', 'about'].includes(w.toLowerCase()));
+
+    if (cleanTokens.length === 0) return [];
+
+    // Check if any token matches document names (e.g. "nexus", "gate", "verirag")
+    const docNameMatches = cleanTokens.map((_, i) => `document_name ILIKE $${i + 1}`);
+    const contentMatches = cleanTokens.map((_, i) => `content ILIKE $${i + 1}`);
+
+    const params = cleanTokens.map((t) => `%${t}%`);
 
     const sql = `
       SELECT 
         id,
         document_name,
         content,
-        ts_rank(to_tsvector('english', content), websearch_to_tsquery('english', $1)) AS rank_score
+        (
+          CASE 
+            WHEN (${docNameMatches.join(' OR ')}) THEN 3.0 
+            ELSE 0.0 
+          END
+          + ts_rank_cd(to_tsvector('english', content), plainto_tsquery('english', $${cleanTokens.length + 1}))
+        ) AS rank_score
       FROM document_chunks
-      WHERE to_tsvector('english', content) @@ websearch_to_tsquery('english', $1)
+      WHERE (${contentMatches.join(' OR ')}) OR (${docNameMatches.join(' OR ')})
       ORDER BY rank_score DESC
-      LIMIT $2;
-    `
+      LIMIT $${cleanTokens.length + 2};
+    `;
 
-    const res = await client.query(sql, [query, topK])
+    const res = await client.query(sql, [...params, query, topK]);
 
-    return res.rows.map((row) =>({
-      id:row.id,
+    return res.rows.map((row) => ({
+      id: row.id,
       documentName: row.document_name,
-      content:row.content,
-      score: parseFloat(row.rank_score),
-      retrievalType:'keyword'
-    }))
-  } finally{
-    client.release()
+      content: row.content,
+      score: parseFloat(row.rank_score) || 0.5,
+      retrievalType: 'keyword',
+    }));
+  } catch (err) {
+    console.warn('⚠️ Keyword search fallback error:', err);
+    return [];
+  } finally {
+    client.release();
   }
 }
-
 
 /**
  * 3. HYBRID SEARCH VIA RECIPROCAL RANK FUSION (RRF)
@@ -165,14 +242,17 @@ export async function keywordSearch(query:string, topK=8): Promise<SearchResult[
 
 export async function streamAnswer(
   query:string,
+  history: ChatTurn[] = [] ,
   onToken: (chunkText: string) => void
 ): Promise<StreamResult>{
 
-  // 1. Fetch top relevant chunks via Hybrid RRF Search
-  const sources = await hybridSearch(query, 6)
+  // 1. Rewrite query if history exists
+  const standaloneQuery = await contextualizeQuery(query, history);
 
-  console.log(`\n🔎 Query: "${query}"`);
-console.log(`📦 Retrieved ${sources.length} chunks:`, sources.map(s => `[${s.documentName} | ${s.id}]`).join(', '));
+  // 2. Fetch top relevant chunks via Hybrid RRF Search
+  const sources = await hybridSearch(standaloneQuery, 6)
+
+  
 
   if (sources.length === 0) {
     const emptyNotice = "I could not find any relevant context in the indexed documents.";
@@ -188,46 +268,46 @@ console.log(`📦 Retrieved ${sources.length} chunks:`, sources.map(s => `[${s.d
     };
   }
 
-  // 2. Format context for prompt injection
+  // 3. Format context for prompt injection
   const formattedContext = sources
     .map((s, i) => `[Document: ${s.documentName} | Chunk ID: ${s.id}]\n${s.content}`)
     .join('\n\n---\n\n');
 
-  const promptText = `You are VeriRAG, an accurate and helpful technical documentation assistant.
+ const stream = await groq.chat.completions.create({
+    model: 'openai/gpt-oss-120b',
+    temperature: 0.2,
+    stream: true,
+    messages: [
+      {
+        role: 'system',
+        content: `You are VeriRAG, an accurate and helpful technical documentation assistant.
+        Your task is to answer the user's question thoroughly using the retrieved reference context below.
+        - Synthesize all relevant facts, configuration parameters, and architectural details present in the context.
+        - Directly answer what is asked. Only state that information is missing if the context contains zero relevant details.
 
-  Your task is to answer the user's question thoroughly using the retrieved reference context below.
-  - Synthesize all relevant facts, configuration parameters, and architectural details present in the context.
-  - Directly answer what is asked. Only state that information is missing if the context contains zero relevant details.
-
-  --- RETRIEVED CONTEXT ---
-  ${formattedContext}
-  -------------------------
-
-  User Question: ${query}`;
-
-  // 3. Request token stream from Gemini
-  const responseStream = await ai.models.generateContentStream({
-    model:'gemini-3.6-flash',
-    contents:[
+        --- RETRIEVED CONTEXT ---
+        ${formattedContext}
+        -------------------------`,
+      },
       {
         role: 'user',
-        parts: [{ text: promptText}],
-      }
-    ]
-  })
+        content: standaloneQuery,
+      },
+    ],
+  });
 
   let fullAnswer = ''
 
-  // 4. Stream tokens chunk-by-chunk to callback
-  for await(const chunk of responseStream){
-    const text = chunk.text || ''
+  // 5. Stream tokens chunk-by-chunk to callback
+  for await(const chunk of stream){
+    const text = chunk.choices[0]?.delta?.content || '';
     if(text){
       fullAnswer += text
       onToken(text)
     }
   }
 
-  // 5. Run Faithfulness / Groundedness Judge Gate evaluation on assembled answer
+  // 6. Run Faithfulness / Groundedness Judge Gate evaluation on assembled answer
   const judgeVerdict = await evaluateFaithfulness(query, sources, fullAnswer);
 
   return {
