@@ -5,20 +5,23 @@ import { Send, ShieldCheck, ShieldAlert, Loader2, Database } from 'lucide-react'
 
 interface Source {
   id: string;
-  document: string;
-  score: string;
+  document?: string;
+  documentName?: string;
+  score?: number | string;
 }
 
 interface Verification {
-  isFaithful: boolean;
+  isFaithful?: boolean;
+  isGrounded?: boolean;
   confidenceScore: number;
-  unsupportedClaims: string[];
+  unsupportedClaims?: string[];
   reasoning: string;
 }
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  isStreaming?: boolean;
   sources?: Source[];
   verification?: Verification;
 }
@@ -51,15 +54,17 @@ export const ChatInterface: React.FC = () => {
     if (!query || loading) return;
 
     setInput('');
-    setMessages((prev) => [...prev, { role: 'user', content: query }]);
     setLoading(true);
 
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
     try {
+      // 1. Check for Action queries (e.g. GitHub issue drafting)
       const isActionQuery = /^(create|open|file|submit|report|draft)\b/i.test(query);
 
       if (isActionQuery) {
+        setMessages((prev) => [...prev, { role: 'user', content: query }]);
+
         const draftRes = await fetch(`${BACKEND_URL}/api/v1/action/draft`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -77,35 +82,107 @@ export const ChatInterface: React.FC = () => {
         }
       }
 
-      const response = await fetch(`${BACKEND_URL}/api/v1/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, topK: 3 }),
-      });
+      // 2. Standard Query Flow with Token Streaming via SSE
+      const assistantMessageIndex = messages.length + 1;
 
-      const data = await response.json();
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: query },
+        {
+          role: 'assistant',
+          content: '',
+          isStreaming: true,
+          sources: [],
+        },
+      ]);
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch query response.');
+      const response = await fetch(
+        `${BACKEND_URL}/api/v1/query/stream?prompt=${encodeURIComponent(query)}`
+      );
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Streaming failed with status: ${response.status}`);
       }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: data.answer,
-          sources: data.sources,
-          verification: data.verification,
-        },
-      ]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let streamBuffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        streamBuffer += decoder.decode(value, { stream: true });
+        const events = streamBuffer.split('\n\n');
+        streamBuffer = events.pop() || '';
+
+        for (const rawEvent of events) {
+          if (!rawEvent.trim()) continue;
+
+          const eventMatch = rawEvent.match(/^event:\s*(.*)$/m);
+          const dataMatch = rawEvent.match(/^data:\s*(.*)$/m);
+
+          const eventType = eventMatch ? eventMatch[1].trim() : 'message';
+          const payload = dataMatch ? JSON.parse(dataMatch[1].trim()) : null;
+
+          if (eventType === 'token' && payload?.token) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const lastIdx = updated.length - 1;
+              if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
+                updated[lastIdx] = {
+                  ...updated[lastIdx],
+                  content: updated[lastIdx].content + payload.token,
+                };
+              }
+              return updated;
+            });
+          } else if (eventType === 'done' && payload) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const lastIdx = updated.length - 1;
+              if (lastIdx >= 0 && updated[lastIdx].role === 'assistant') {
+                updated[lastIdx] = {
+                  ...updated[lastIdx],
+                  isStreaming: false,
+                  sources: payload.sources || [],
+                  verification: payload.judgeVerdict
+                    ? {
+                        isFaithful: payload.judgeVerdict.isGrounded ?? payload.judgeVerdict.isFaithful,
+                        confidenceScore: payload.judgeVerdict.confidenceScore ?? 0,
+                        unsupportedClaims: payload.judgeVerdict.unsupportedClaims || [],
+                        reasoning: payload.judgeVerdict.reasoning || '',
+                      }
+                    : undefined,
+                };
+              }
+              return updated;
+            });
+          } else if (eventType === 'error') {
+            console.error('SSE Error:', payload?.message);
+          }
+        }
+      }
     } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `⚠️ **Error:** ${err.message || 'Unable to connect to the backend.'}`,
-        },
-      ]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        const lastIdx = updated.length - 1;
+        if (lastIdx >= 0 && updated[lastIdx].role === 'assistant' && updated[lastIdx].isStreaming) {
+          updated[lastIdx] = {
+            role: 'assistant',
+            content: `⚠️ **Error:** ${err.message || 'Unable to connect to the backend stream.'}`,
+            isStreaming: false,
+          };
+          return updated;
+        }
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: `⚠️ **Error:** ${err.message || 'Unable to connect to the backend stream.'}`,
+          },
+        ];
+      });
     } finally {
       setLoading(false);
     }
@@ -127,13 +204,25 @@ export const ChatInterface: React.FC = () => {
                   : 'bg-slate-800/90 text-slate-200 border border-slate-700/60 rounded-bl-none'
               }`}
             >
-              {/* Message Content */}
+              {/* Message Content with Streaming Indicator */}
               <div className="leading-relaxed space-y-2 text-[14px]">
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                {msg.content ? (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ) : (
+                  msg.isStreaming && (
+                    <span className="inline-flex items-center gap-1.5 text-indigo-400 text-xs py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Retrieving context & generating response...
+                    </span>
+                  )
+                )}
+                {msg.isStreaming && msg.content && (
+                  <span className="inline-block w-1.5 h-4 ml-1 bg-indigo-400 animate-pulse align-middle" />
+                )}
               </div>
 
               {/* Judge Gate Verification Banner */}
-              {msg.verification && (
+              {!msg.isStreaming && msg.verification && (
                 <div
                   className={`mt-3.5 pt-3 border-t text-xs rounded-lg p-3 ${
                     msg.verification.isFaithful
@@ -150,7 +239,7 @@ export const ChatInterface: React.FC = () => {
                     ) : (
                       <>
                         <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
-                        <span>Judge Flagged Hallucination / Unsupported Claim</span>
+                        <span>Judge Flagged Hallucination / Low Confidence</span>
                       </>
                     )}
                   </div>
@@ -161,31 +250,28 @@ export const ChatInterface: React.FC = () => {
               )}
 
               {/* Source Reference Badges */}
-              {msg.sources && msg.sources.length > 0 && (
+              {!msg.isStreaming && msg.sources && msg.sources.length > 0 && (
                 <div className="mt-3 pt-2.5 border-t border-slate-700/50 flex flex-wrap gap-1.5 items-center">
                   <span className="text-[10px] tracking-wider uppercase font-semibold text-slate-400 flex items-center gap-1">
                     <Database className="w-3 h-3 text-indigo-400" /> Sources:
                   </span>
-                  {msg.sources.map((s, sIdx) => (
-                    <span
-                      key={sIdx}
-                      className="text-[10px] bg-slate-900/90 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-md font-mono"
-                    >
-                      {s.id} ({s.score})
-                    </span>
-                  ))}
+                  {msg.sources.map((s, sIdx) => {
+                    const docLabel = s.documentName || s.document || s.id;
+                    const scoreLabel = typeof s.score === 'number' ? s.score.toFixed(3) : s.score;
+                    return (
+                      <span
+                        key={sIdx}
+                        className="text-[10px] bg-slate-900/90 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-md font-mono"
+                      >
+                        {docLabel} {scoreLabel ? `(${scoreLabel})` : ''}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>
           </div>
         ))}
-
-        {loading && (
-          <div className="flex items-center gap-2.5 text-indigo-400 text-xs py-2 px-3 bg-indigo-950/30 border border-indigo-900/40 rounded-xl w-fit">
-            <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-            <span>Hybrid searching & running LLM Judge Gate...</span>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -203,7 +289,11 @@ export const ChatInterface: React.FC = () => {
           disabled={loading || !input.trim()}
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
         >
-          <Send className="w-4 h-4" />
+          {loading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
         </button>
       </form>
 

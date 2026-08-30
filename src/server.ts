@@ -7,8 +7,9 @@ import { chunkText, ingestDocument } from './ingest.js'
 import { askQuestion } from './rag.js'
 import { hybridSearch } from './retrieve.js'
 import { classifyAndDraftAction, dispatchGitHubIssue } from './action.js'
-import { evaluateFaithfulness } from './judge.js'
+import { evaluateFaithfulness , evaluateActionFaithfulness} from './judge.js'
 import { listIndexedDocuments, deleteDocumentChunks } from './ingest.js'
+import { streamAnswer } from './retrieve.js'
 import pg from 'pg'
 
 const { Pool } = pg
@@ -112,8 +113,8 @@ app.post('/api/v1/action/draft', async (req: Request, res:Response) : Promise<vo
       return;
     }
 
-    const combinedText = `${draft.title}\n${draft.body}`
-    const verification  = await evaluateFaithfulness(query, chunks, combinedText)
+
+    const verification  = await evaluateActionFaithfulness(query, draft.title, draft.body, chunks)
 
     if (!verification.isFaithful || verification.confidenceScore < 0.7) {
       res.status(200).json({
@@ -205,6 +206,53 @@ app.delete('/api/v1/documents/:documentName', async (req: Request, res: Response
   }
 });
 
+
+// ============================================================================
+// SSE STREAMING ROUTE
+// ============================================================================
+
+/**
+ * GET /api/v1/query/stream?prompt=...
+ * Streams LLM tokens in real time and sends final metadata (sources + judge verdict).
+ */
+
+app.get('/api/v1/query/stream', async (req: Request, res:Response): Promise<void> => {
+  const prompt = req.query.prompt as string
+
+  if (!prompt || typeof prompt !== 'string') {
+    res.status(400).json({ error: 'A query parameter "prompt" is required.' });
+    return;
+  }
+
+  // Set SSE Headers
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const sendSSE = (event: string, payload: any) =>{
+    res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+  }
+
+  try {
+    const result = await streamAnswer(prompt, (tokenText: string) => {
+      sendSSE('token', { token: tokenText });
+    });
+
+    // Send final completion payload
+    sendSSE('done', {
+      sources: result.sources,
+      judgeVerdict: result.judgeVerdict,
+      fullAnswer: result.fullAnswer,
+    });
+
+    res.end();
+  } catch (err: any) {
+    console.error('SSE Generation Error:', err);
+    sendSSE('error', { message: err.message || 'Stream processing failed' });
+    res.end();
+  }
+})
 
 app.listen(PORT, ()=>{
   console.log(`🚀 VeriRAG Backend Server listening on http://localhost:${PORT}`);

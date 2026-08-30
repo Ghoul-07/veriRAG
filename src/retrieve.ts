@@ -1,5 +1,5 @@
 // ============================================================================
-// HYBRID RETRIEVAL ENGINE (Dense Vector + BM25 Sparse Search + RRF)
+// HYBRID RETRIEVAL ENGINE (Dense Vector + BM25 Sparse Search + RRF + Streaming)
 // ============================================================================
 // Combines cosine vector similarity (Gemini) and PostgreSQL full-text search (tsvector)
 // using Reciprocal Rank Fusion (RRF) for optimal keyword and semantic recall.
@@ -7,6 +7,8 @@
 import pg from 'pg'
 import 'dotenv/config'
 import { GoogleGenAI } from '@google/genai'
+import { evaluateFaithfulness } from './judge.js'
+import { chunkText } from './ingest.js'
 
 const { Pool } = pg
 const pool = new Pool({connectionString: process.env.DATABASE_URL})
@@ -18,6 +20,12 @@ export interface SearchResult{
   content: string,
   score: number,
   retrievalType?: 'vector' | 'keyword' | 'hybrid'
+}
+
+export interface StreamResult {
+  fullAnswer: string,
+  sources: SearchResult[],
+  judgeVerdict:any
 }
 
 /**
@@ -80,7 +88,7 @@ export async function vectorSearch(query: string, topK= 5): Promise<SearchResult
  * 2. SPARSE KEYWORD SEARCH (PostgreSQL tsvector / GIN Full-Text Search)
  */
 
-export async function keywordSearch(query:string, topK=5): Promise<SearchResult[]>{
+export async function keywordSearch(query:string, topK=8): Promise<SearchResult[]>{
   const client = await pool.connect()
 
   try{
@@ -90,9 +98,9 @@ export async function keywordSearch(query:string, topK=5): Promise<SearchResult[
         id,
         document_name,
         content,
-        ts_rank(to_tsvector('english', content), plainto_tsquery('english', $1)) AS rank_score
+        ts_rank(to_tsvector('english', content), websearch_to_tsquery('english', $1)) AS rank_score
       FROM document_chunks
-      WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $1)
+      WHERE to_tsvector('english', content) @@ websearch_to_tsquery('english', $1)
       ORDER BY rank_score DESC
       LIMIT $2;
     `
@@ -148,6 +156,86 @@ export async function keywordSearch(query:string, topK=5): Promise<SearchResult[
         retrievalType: 'hybrid',
       }));
   }
+
+  /**
+ * 4. TOKEN STREAMING GENERATION WITH JUDGE GATE
+ * Executes hybrid search, streams answer tokens via callback,
+ * and performs a faithfulness check upon generation completion.
+ */
+
+export async function streamAnswer(
+  query:string,
+  onToken: (chunkText: string) => void
+): Promise<StreamResult>{
+
+  // 1. Fetch top relevant chunks via Hybrid RRF Search
+  const sources = await hybridSearch(query, 6)
+
+  console.log(`\n🔎 Query: "${query}"`);
+console.log(`📦 Retrieved ${sources.length} chunks:`, sources.map(s => `[${s.documentName} | ${s.id}]`).join(', '));
+
+  if (sources.length === 0) {
+    const emptyNotice = "I could not find any relevant context in the indexed documents.";
+    onToken(emptyNotice);
+    return {
+      fullAnswer: emptyNotice,
+      sources: [],
+      judgeVerdict: {
+        isGrounded: false,
+        confidenceScore: 0,
+        reasoning: 'No relevant chunks found in the database.',
+      },
+    };
+  }
+
+  // 2. Format context for prompt injection
+  const formattedContext = sources
+    .map((s, i) => `[Document: ${s.documentName} | Chunk ID: ${s.id}]\n${s.content}`)
+    .join('\n\n---\n\n');
+
+  const promptText = `You are VeriRAG, an accurate and helpful technical documentation assistant.
+
+  Your task is to answer the user's question thoroughly using the retrieved reference context below.
+  - Synthesize all relevant facts, configuration parameters, and architectural details present in the context.
+  - Directly answer what is asked. Only state that information is missing if the context contains zero relevant details.
+
+  --- RETRIEVED CONTEXT ---
+  ${formattedContext}
+  -------------------------
+
+  User Question: ${query}`;
+
+  // 3. Request token stream from Gemini
+  const responseStream = await ai.models.generateContentStream({
+    model:'gemini-3.6-flash',
+    contents:[
+      {
+        role: 'user',
+        parts: [{ text: promptText}],
+      }
+    ]
+  })
+
+  let fullAnswer = ''
+
+  // 4. Stream tokens chunk-by-chunk to callback
+  for await(const chunk of responseStream){
+    const text = chunk.text || ''
+    if(text){
+      fullAnswer += text
+      onToken(text)
+    }
+  }
+
+  // 5. Run Faithfulness / Groundedness Judge Gate evaluation on assembled answer
+  const judgeVerdict = await evaluateFaithfulness(query, sources, fullAnswer);
+
+  return {
+    fullAnswer,
+    sources,
+    judgeVerdict,
+  };
+}
 
 
 // Direct test runner
