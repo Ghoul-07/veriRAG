@@ -10,9 +10,7 @@ export default function App() {
   const [refreshCount, setRefreshCount] = useState(0)
 
   // Trigger when a new upload succeeds
-  const handleUploadSuccess = () => {
-    setRefreshCount((prev) => prev + 1);
-  };
+  
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center py-10 px-4">

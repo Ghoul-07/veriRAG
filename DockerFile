@@ -1,0 +1,33 @@
+# build react client
+FROM node:20-alpine AS client-builder
+WORKDIR /app/client
+COPY client/package*.json ./
+RUN npm ci
+COPY client/ ./
+RUN npm run build
+
+# build node backend
+FROM node:20-alpine AS server-builder
+WORKDIR /app
+COPY package*.json tsconfig.json ./
+RUN npm ci
+COPY src/ ./src
+RUN npm run build
+
+# Production Runner
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY --from=server-builder /app/dist ./dist
+COPY --from=client-builder /app/client/dist ./client-dist
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/documents || exit 1
+
+CMD ["node", "dist/server.js"]
+
+

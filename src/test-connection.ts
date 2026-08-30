@@ -3,7 +3,6 @@ import pg from 'pg'
 import Groq from 'groq-sdk'
 // specifically for generating text embeddings
 import { GoogleGenAI } from '@google/genai'
-import { run } from 'node:test'
 
 // connection pool manages a set of active database connections , so we don't have to open/close a TCP conn. on every query
 const { Pool} = pg
