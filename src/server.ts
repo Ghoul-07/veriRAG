@@ -22,7 +22,11 @@ const __dirname = path.dirname(__filename);
 const clientDistPath = path.resolve(__dirname, '../client-dist');
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL,
+  ssl:{
+    rejectUnauthorized: false
+  }
+ });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
