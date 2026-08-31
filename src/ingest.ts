@@ -9,7 +9,11 @@ import pg from 'pg'
 import { GoogleGenAI } from '@google/genai'
 
 const {Pool} = pg
-const pool = new Pool({connectionString:process.env.DATABASE_URL})
+const pool = new Pool({connectionString:process.env.DATABASE_URL,
+  ssl:{
+    rejectUnauthorized:false
+  }
+})
 const ai = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY})
 
 // configuration for sliding window chunking

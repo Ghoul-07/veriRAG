@@ -11,7 +11,11 @@ import { evaluateFaithfulness } from './judge.js'
 import Groq from 'groq-sdk'
 
 const { Pool } = pg
-const pool = new Pool({connectionString: process.env.DATABASE_URL})
+const pool = new Pool({connectionString: process.env.DATABASE_URL,
+  ssl:{
+    rejectUnauthorized: false
+  }
+})
 
 const ai = new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY})
 const groq = new Groq({apiKey:process.env.GROQ_API_KEY})

@@ -20,7 +20,12 @@ async function runHealthCheck() {
   // --------------------------------------------------------------------------
   console.log('--- [1/3] Testing PostgreSQL + pgvector Extension ---');
 
-  const pool = new Pool({connectionString: process.env.DATABASE_URL})
+  const pool = new Pool({connectionString: process.env.DATABASE_URL,
+    ssl:
+    {
+      rejectUnauthorized: false
+    }
+  })
 
   try{
     // tell postgres to enable vector plugins 

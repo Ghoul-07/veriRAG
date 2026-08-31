@@ -18,7 +18,12 @@ import { classifyAndDraftAction } from './action.js';
 import { evaluateFaithfulness } from './judge.js';
 
 const { Pool } = pg
-const pool = new Pool({connectionString:process.env.DATABASE_URL})
+const pool = new Pool({connectionString:process.env.DATABASE_URL,
+  ssl:
+  {
+    rejectUnauthorized: false
+  }
+})
 
 interface EvalTestCase{
   id: string;
