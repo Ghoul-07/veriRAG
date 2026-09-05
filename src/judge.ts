@@ -32,30 +32,31 @@ export async function evaluateFaithfulness(query: string, contextChunks: SearchR
    .join('\n\n---\n\n')
 
 
-  const judgePrompt = `You are a strict evaluation judge in an automated RAG verification pipeline.
-  Your job is to determine whether the GENERATED ANSWER is strictly and factually faithful to the provided CONTEXT.
+  const judgePrompt = `You are an automated evaluation judge in a strict RAG verification pipeline.
+    Your job is to determine whether the GENERATED ANSWER is factually faithful to the provided CONTEXT.
 
-  Evaluation Criteria:
-  1. Every factual statement in the answer MUST be directly supported by the context.
-  2. If the answer introduces external knowledge, unmentioned facts, or fabricated statistics not in the context, it is NOT faithful.
-  3. If the answer accurately states it cannot answer due to lack of context, it IS faithful.
+    CONTEXT:
+    ${context}
 
-  CONTEXT:
-  ${context}
+    USER QUESTION:
+    ${query}
 
-  USER QUESTION:
-  ${query}
+    GENERATED ANSWER:
+    ${answer}
 
-  GENERATED ANSWER:
-  ${answer}
+    Evaluation Rules:
+    1. Material Grounding: Every material factual assertion (features, mechanisms, endpoints, configurations, status codes) MUST be supported by or directly inferable from the context.
+    2. Hallucination Penalties: Mark "isFaithful": false ONLY if the answer introduces concrete technical claims, non-existent capabilities, external mechanisms, or architecture components that have ZERO basis in the context.
+    3. Paraphrasing & Phrasing: Do NOT penalize standard English paraphrasing, natural language summaries, or transitions that do not distort the underlying facts.
+    4. Omission Handling: If the answer explicitly states that certain information is missing from the documentation, that statement IS faithful.
 
-  Return a valid JSON object matching this schema EXACTLY without markdown wrappers:
-  {
-    "isFaithful": boolean,
-    "confidenceScore": number, // between 0.0 and 1.0
-    "unsupportedClaims": string[], // list any claims not found in context
-    "reasoning": "concise explanation of your verdict"
-  }`;
+    Return a valid JSON object matching this schema EXACTLY without markdown wrappers:
+    {
+      "isFaithful": boolean,
+      "confidenceScore": number, // between 0.0 and 1.0 (score >= 0.70 when fully faithful)
+      "unsupportedClaims": string[], // list ONLY material claims not found in context
+      "reasoning": "concise explanation of your verdict"
+    }`;
 
   const completion = await groq.chat.completions.create({
     model:'openai/gpt-oss-120b',

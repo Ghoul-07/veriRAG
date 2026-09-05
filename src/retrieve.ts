@@ -11,11 +11,16 @@ import { evaluateFaithfulness } from './judge.js'
 import Groq from 'groq-sdk'
 
 const { Pool } = pg
-const pool = new Pool({connectionString: process.env.DATABASE_URL,
-  ssl:{
-    rejectUnauthorized: false
-  }
-})
+const isLocal = 
+  !process.env.DATABASE_URL || 
+  process.env.DATABASE_URL.includes('localhost') || 
+  process.env.DATABASE_URL.includes('127.0.0.1') ||
+  process.env.DATABASE_URL.includes('@postgres:'); // Docker service name
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: isLocal ? false : { rejectUnauthorized: false },
+});
 
 const ai = new GoogleGenAI({apiKey:process.env.GEMINI_API_KEY})
 const groq = new Groq({apiKey:process.env.GROQ_API_KEY})
@@ -284,10 +289,15 @@ export async function streamAnswer(
     messages: [
       {
         role: 'system',
-        content: `You are VeriRAG, an accurate and helpful technical documentation assistant.
-        Your task is to answer the user's question thoroughly using the retrieved reference context below.
-        - Synthesize all relevant facts, configuration parameters, and architectural details present in the context.
-        - Directly answer what is asked. Only state that information is missing if the context contains zero relevant details.
+        content: `You are VeriRAG, a strictly context-bound technical assistant.
+          Your task is to answer the user's question using ONLY the direct facts provided in the retrieved reference context below.
+
+          STRICT OPERATIONAL RULES:
+          1. Every claim, architecture component, or technical mechanism you describe MUST be directly supported by the context below.
+          2. Do NOT extrapolate, speculate, or introduce external technical details (e.g. self-correction loops, specific mathematical formulas, or unmentioned features) that are not explicitly stated in the context chunks.
+          3. If the context does not explicitly provide enough detail to answer part of the question, state that the specific detail is not mentioned in the documentation.
+          4. Keep the response concise, factual, and strictly truthful to the excerpts.
+          5. Do NOT cite chunk IDs, chunk numbers, or source tags (e.g., do not write '(Chunk 9)' or '[Chunk 2]') in your answer. Provide clean, natural prose.
 
         --- RETRIEVED CONTEXT ---
         ${formattedContext}

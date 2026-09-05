@@ -22,12 +22,16 @@ const __dirname = path.dirname(__filename);
 const clientDistPath = path.resolve(__dirname, '../client-dist');
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL,
-  ssl:{
-    rejectUnauthorized: false
-  }
- });
+const isLocal = 
+  !process.env.DATABASE_URL || 
+  process.env.DATABASE_URL.includes('localhost') || 
+  process.env.DATABASE_URL.includes('127.0.0.1') ||
+  process.env.DATABASE_URL.includes('@postgres:'); // Docker service name
 
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: isLocal ? false : { rejectUnauthorized: false },
+});
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
