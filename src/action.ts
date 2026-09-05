@@ -48,7 +48,8 @@ export async function classifyAndDraftAction(query: string, contextChunks: Searc
       "labels": ["bug" | "documentation" | "enhancement"]
     }`;
 
-  const completion = await groq.chat.completions.create({
+  try{
+    const completion = await groq.chat.completions.create({
     model: 'openai/gpt-oss-120b',
     messages: [
       { role: 'system', content: 'Respond ONLY with valid JSON.' },
@@ -58,9 +59,25 @@ export async function classifyAndDraftAction(query: string, contextChunks: Searc
     response_format: { type: 'json_object' }
   });
 
-  try {
     return JSON.parse(completion.choices[0]?.message?.content || '{}') as IssueDraft;
-  } catch {
+  } catch(err: any) {
+
+    // Intercept safety refusals, JSON validation errors, or HTTP 400s cleanly as an action rejection
+    const isSafetyRefusal =
+      err?.error?.error?.code === 'json_validate_failed' ||
+      err?.status === 400 ||
+      err?.message?.includes('json_validate_failed') ||
+      err?.error?.error?.failed_generation?.includes("can't help");
+    
+    if (isSafetyRefusal) {
+      return {
+        isActionIntent: false,
+        title: '',
+        body: 'Action blocked by safety policy or invalid action intent.',
+        labels: []
+      };
+    }
+    
     return {
       isActionIntent: false,
       title: '',

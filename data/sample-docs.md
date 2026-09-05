@@ -1,43 +1,68 @@
-# Nexus Infrastructure & Gateway Architecture
+# Nexus-Gate Architecture & Production Specification
 
-## Overview
+Nexus-Gate is an event-driven reverse proxy, API gateway, and distributed telemetry engine engineered in TypeScript and Node.js. It coordinates high-throughput microservice routing, client-side traffic shaping, robust security verification, and real-time observability.
 
-Nexus-Gate is an event-driven reverse proxy and API Gateway engineered for microservice environments. It handles dynamic request routing, token-bucket rate limiting, circuit breaking, and telemetry streaming.
+---
 
-## Rate Limiting Architecture
+## 1. Rate Limiting & Traffic Regulation
 
-Nexus-Gate implements a distributed Token Bucket algorithm backed by Redis. Each client IP or API token receives a refill rate of 100 tokens per minute with a burst capacity of 200 tokens. When the token count reaches zero, the gateway immediately returns HTTP 429 Too Many Requests with a `Retry-After` header.
+Nexus-Gate enforces a distributed Token Bucket algorithm backed by Redis to regulate incoming client traffic across horizontal gateway instances.
 
-## Circuit Breaker Pattern
+- **Token Bucket Parameters:** Every registered API key or client IP is allocated an isolated bucket with a continuous refill rate of 100 tokens per minute and a burst capacity of 200 tokens.
+- **Storage Strategy:** Token counts and timestamp states are tracked via atomic Redis keys utilizing TTL expiration to prevent memory leaks for dormant clients.
+- **Throttling Behavior:** When an incoming client request exceeds available tokens, the gateway rejects the request with an HTTP 429 Too Many Requests status code.
+- **Retry Semantics:** The response payload includes a `Retry-After` header indicating the exact number of seconds until sufficient tokens are replenished.
+- **Burst Mitigation:** The token bucket bounds instantaneous request spikes to the burst capacity, protecting downstream microservices from request saturation.
 
-To prevent cascading failures across downstream services, Nexus-Gate implements a 3-state Circuit Breaker:
+---
 
-- **CLOSED**: Requests flow normally to downstream microservices. Error rates are tracked over a 10-second rolling window.
-- **OPEN**: If downstream error rates exceed 50%, the circuit trips to OPEN. All subsequent requests fail fast immediately with HTTP 503 Service Unavailable without hitting the downstream server.
-- **HALF-OPEN**: After a 30-second cooldown timeout, the circuit enters HALF-OPEN state, allowing a canary probe of 5 requests through. If all 5 succeed, the circuit resets to CLOSED; otherwise, it trips back to OPEN.
+## 2. Reverse Proxy & Upstream Routing Engine
 
-## Authentication & Authorization
+The core forwarding engine is implemented using native Node.js HTTP streams and TCP connection pooling to minimize memory allocations and proxy latency.
 
-Requests pass through a JWT validation middleware before routing. The gateway verifies HMAC-SHA256 signatures, validates token expiration timestamps, and extracts role claims (`admin`, `developer`, `readonly`) to enforce endpoint-level Role-Based Access Control (RBAC).
+- **Connection Management:** Reuses established TCP sockets using an active connection pool, avoiding three-way handshake overhead on high-frequency routes.
+- **Streaming Support:** Supports end-to-end chunked HTTP streaming for large payloads, file uploads, and Server-Sent Events (SSE).
+- **Timeout Configuration:** The reverse proxy enforces strict upstream request timeouts. If a backend replica fails to respond within the configured deadline, the proxy drops the socket and increments upstream failure counters.
+- **Load Balancing:** Upstream routing uses a Least-Connections load balancing strategy with round-robin tie-breaking to distribute traffic evenly across replicas.
+- **Target Configuration:** Upstream replica pools and routing tables are configured using the `UPSTREAM_TARGETS` environment variable.
+- **Proactive Health Checks:** Background probes periodically test backend endpoints. Any replica failing two consecutive health checks is temporarily evicted from the routing table until recovery is confirmed.
 
-## Health Check and Metrics
+---
 
-Prometheus metrics are exposed on port 9090 at `/metrics`. Key exported metrics include `http_requests_total`, `gateway_circuit_breaker_state`, and `upstream_response_time_seconds`.
+## 3. Circuit Breaker Lifecycle & Fault Tolerance
 
-<! Disfactor chunks to check performance of dense vs hybrid search-->
+To isolate failing downstream dependencies and prevent cascading outages, Nexus-Gate implements a finite 3-state Circuit Breaker pattern:
 
-## Ingress Rate Limiting v2 (Cluster Mode)
+- **States:** The breaker transitions between CLOSED, OPEN, and HALF-OPEN.
+  - **CLOSED:** Normal operating condition. Traffic routes transparently to upstream services.
+  - **OPEN:** The breaker trips when downstream failure rates exceed 50% over a 10-second rolling window. All traffic to the target is blocked at the gateway, returning HTTP 502 Bad Gateway or 504 Gateway Timeout without consuming upstream sockets.
+  - **HALF-OPEN:** After entering OPEN, a 30-second cooldown timeout elapses. The breaker switches to HALF-OPEN to test downstream recovery.
+- **Canary Probing:** In the HALF-OPEN state, exactly 5 canary probe requests are permitted through to the backend service.
+- **Recovery & Trip Rules:**
+  - If all 5 canary probe requests succeed, the breaker transitions back to CLOSED and resets error metrics.
+  - If any single canary request fails, the breaker immediately trips back to OPEN and restarts the 30-second cooldown timeout.
 
-Nexus-Gate cluster-mode rate limiting uses a Leaky Bucket algorithm backed by Hazelcast with a drain rate of 500 req/s. When tripped, it responds with HTTP 429 and header X-RateLimit-Reset-Ms.
+---
 
-## Circuit Breaker (gRPC Subsystem)
+## 4. Authentication & Role-Based Access Control (RBAC)
 
-The gRPC circuit breaker uses two states: ACTIVE and TRIPPED. It monitors latency timeouts over 5000ms rather than 50% error rates, returning status code UNAVAILABLE (14).
+Nexus-Gate secures sensitive endpoints through cryptographically signed JSON Web Tokens (JWT).
 
-## Telemetry & Metrics (StatsD / OpenTelemetry)
+- **Token Extraction:** Incoming requests must provide the token in the `Authorization` header using the `Bearer <token>` scheme.
+- **Cryptographic Signature:** Tokens are verified using HMAC-SHA256 (HS256) encryption validated against the shared `JWT_SECRET` signing key.
+- **Required Claims:** Valid tokens must contain standard `sub` (subject identifier), `role` (user permissions), and `exp` (expiration timestamp) claims.
+- **Token Expiration:** Requests containing expired JWT tokens are immediately rejected with an HTTP 401 Unauthorized response.
+- **Privileged Access:** Access to sensitive administration, gateway metrics, and route configuration endpoints strictly requires the `admin` role claim. Requests lacking this role receive an HTTP 403 Forbidden status code.
 
-StatsD telemetry exports metrics over UDP port 8125. Metric keys include statsd_requests_total and statsd_upstream_latency_ms.
+---
 
-## Legacy OAuth1 Authentication
+## 5. Observability, Telemetry & Real-Time Dashboards
 
-Legacy API v1 routes require OAuth1 HMAC-SHA1 signatures with oauth_consumer_key and oauth_token parameters. Expired signatures return HTTP 401 Unauthorized with WWW-Authenticate header.
+Nexus-Gate provides real-time distributed telemetry and Prometheus monitoring integration.
+
+- **Prometheus Exporter:** System metrics are exposed on port 9090 at the `/metrics` endpoint.
+- **Exported Metric Names:**
+  - `http_requests_total`: Tracks aggregate request volume labeled by HTTP method, path, and response status code.
+  - `gateway_circuit_breaker_state`: Gauge indicating the current state (0 = CLOSED, 1 = HALF-OPEN, 2 = OPEN) of each upstream circuit breaker.
+  - `upstream_response_time_seconds`: Histogram and summary gauge measuring latency distributions for proxied upstream calls.
+- **Live Control Plane Relays:** Operational dashboards receive real-time updates via WebSocket relays connected to Upstash Redis Pub/Sub channels broadcasting system throughput, circuit trips, and socket states.

@@ -4,7 +4,7 @@
 
 import 'dotenv/config'
 import Groq from 'groq-sdk'
-import { vectorSearch, SearchResult } from './retrieve.js'
+import { hybridSearch, SearchResult } from './retrieve.js'
 import { EvaluationResult, evaluateFaithfulness } from './judge.js'
 
 const groq = new Groq({apiKey: process.env.GROQ_API_KEY})
@@ -25,37 +25,40 @@ function buildPrompt(query: string, chunks: SearchResult[]): string{
     .join('\n\n---\n\n');
 
   return `You are VeriRAG, an accurate and grounded technical assistant.
-Answer the user's question STRICTLY using the context provided below.
-If the context does not contain enough information to answer the question, state clearly: "I cannot answer this question based on the provided documentation."
-Always reference which Source ID you used to form each part of your answer.
+    Answer the user's question directly using the provided context chunks.
+    Extract all facts, algorithms, numbers, and configurations that are present.
+    If a specific detail is not mentioned in the context, answer the parts that ARE mentioned, and briefly state what detail was not found.
+    Only state "I cannot answer this question based on the provided documentation." if the context contains ZERO relevant information.
+    Do NOT refuse the entire question if at least one part is answered in the context.
 
-### CONTEXT:
-${context}
+    ### CONTEXT:
+    ${context}
 
-### USER QUESTION:
-${query}
+    ### USER QUESTION:
+    ${query}
 
-### GROUNDED ANSWER:`;
+    ### GROUNDED ANSWER:`;
 }
 
 /**
  * Runs the complete RAG pipeline for a given query.
  */
 
-export async function askQuestion(query: string, topK=3):Promise<VerifiedRagResponse>{
+export async function askQuestion(query: string, topK=5):Promise<VerifiedRagResponse>{
   // 1. Retrieve the most relevant chunks from postgres
-  const retrievedChunks = await vectorSearch(query, topK)
+  const retrievedChunks = await hybridSearch(query, topK)
 
   if(retrievedChunks.length === 0){
     return {
       query,
-      answer: 'No relevant context found in database.',
+      answer: 'I cannot answer this question based on the provided documentation.',
       sources:[],
       verification:{
         isFaithful: false,
-        confidenceScore: 0.0,
+        confidenceScore: 1.0,
+        hasSufficientContext: false,
         unsupportedClaims: [],
-        reasoning: 'No context was found; correctly flagged as empty'
+        reasoning: 'No relevant context found in database; accurately reported lack of context.'
       }
     }
   }
@@ -76,7 +79,7 @@ export async function askQuestion(query: string, topK=3):Promise<VerifiedRagResp
         content: prompt
       }
     ],
-    temperature: 0.1, // Low temperature for high factual accuracy
+    temperature: 0.0, // Low temperature for high factual accuracy
   })
 
   const rawAnswer = completion.choices[0]?.message?.content || 'No response generated'
@@ -86,18 +89,13 @@ export async function askQuestion(query: string, topK=3):Promise<VerifiedRagResp
 
   const verification = await evaluateFaithfulness(query, retrievedChunks, rawAnswer)
 
-  let finalAnswer = rawAnswer
-  if(!verification.isFaithful){
-    finalAnswer = `⚠️ [Verification Warning]: The generated answer failed faithfulness checks. \nReason: ${verification.reasoning}`;
-  }
-
   return {
     query,
-    answer: finalAnswer,
+    answer: rawAnswer,
     sources: retrievedChunks.map((c)=>({
       id: c.id,
       document: c.documentName,
-      score: `${(c.score * 100).toFixed(2)}%`,
+      score: c.score.toFixed(4),
     })),
     verification
   }
@@ -109,23 +107,30 @@ async function run() {
   console.log(`🤖 Asking VeriRAG: "${query}"\n`);
 
   try {
-    const response = await askQuestion(query, 2);
+    const response = await askQuestion(query, 3);
 
-    console.log('\n====================================================');
-    console.log('💬 ANSWER:');
-    console.log('====================================================');
-    console.log(response.answer);
+    // Format the answer and verification cleanly
+    const output = [
+      '',
+      '====================================================',
+      '💬 ANSWER:',
+      '====================================================',
+      response.answer,
+      '',
+      '====================================================',
+      '⚖️ VERIFICATION REPORT:',
+      '====================================================',
+      `Status:              ${response.verification.isFaithful ? '✅ PASS' : '❌ FAIL'}`,
+      `Sufficient Context:  ${response.verification.hasSufficientContext ? '✅ YES' : '❌ NO'}`,
+      `Confidence:          ${(response.verification.confidenceScore * 100).toFixed(0)}%`,
+      `Reasoning:           ${response.verification.reasoning}`,
+      '',
+      '====================================================',
+      '📚 SOURCES USED:',
+      '====================================================',
+    ].join('\n');
 
-    console.log('\n====================================================');
-    console.log('⚖️ VERIFICATION REPORT:');
-    console.log('====================================================');
-    console.log(`Status:      ${response.verification.isFaithful ? '✅ PASS' : '❌ FAIL'}`);
-    console.log(`Confidence:  ${(response.verification.confidenceScore * 100).toFixed(0)}%`);
-    console.log(`Reasoning:   ${response.verification.reasoning}`);
-
-    console.log('\n====================================================');
-    console.log('📚 SOURCES USED:');
-    console.log('====================================================');
+    console.log(output);
     console.table(response.sources);
   } catch (err) {
     console.error('❌ RAG Pipeline Error:', err);

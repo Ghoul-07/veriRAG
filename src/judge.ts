@@ -13,6 +13,7 @@ const groq = new Groq({apiKey: process.env.GROQ_API_KEY})
 export interface EvaluationResult{
   isFaithful: boolean,
   confidenceScore: number,
+  hasSufficientContext: boolean,
   unsupportedClaims: string[],
   reasoning: string
 }
@@ -33,7 +34,7 @@ export async function evaluateFaithfulness(query: string, contextChunks: SearchR
 
 
   const judgePrompt = `You are an automated evaluation judge in a strict RAG verification pipeline.
-    Your job is to determine whether the GENERATED ANSWER is factually faithful to the provided CONTEXT.
+    Your job is to determine whether the GENERATED ANSWER is factually faithful to the provided CONTEXT, and whether it answers the question or states lack of context.
 
     CONTEXT:
     ${context}
@@ -48,11 +49,13 @@ export async function evaluateFaithfulness(query: string, contextChunks: SearchR
     1. Material Grounding: Every material factual assertion (features, mechanisms, endpoints, configurations, status codes) MUST be supported by or directly inferable from the context.
     2. Hallucination Penalties: Mark "isFaithful": false ONLY if the answer introduces concrete technical claims, non-existent capabilities, external mechanisms, or architecture components that have ZERO basis in the context.
     3. Paraphrasing & Phrasing: Do NOT penalize standard English paraphrasing, natural language summaries, or transitions that do not distort the underlying facts.
-    4. Omission Handling: If the answer explicitly states that certain information is missing from the documentation, that statement IS faithful.
+    4. Refusal & Omission Handling: If the answer states that it cannot answer or that information is missing, "isFaithful" MUST be true. Never mark a refusal as a hallucination or unfaithful. Instead, set "hasSufficientContext": false.
+    5. Context Sufficiency: Set "hasSufficientContext": true if the answer resolved the user's question with facts from the context. Set "hasSufficientContext": false if the answer primarily states that the information is missing, unmentioned, or outside the scope of the documentation.
 
     Return a valid JSON object matching this schema EXACTLY without markdown wrappers:
     {
       "isFaithful": boolean,
+      "hasSufficientContext": boolean,
       "confidenceScore": number, // between 0.0 and 1.0 (score >= 0.70 when fully faithful)
       "unsupportedClaims": string[], // list ONLY material claims not found in context
       "reasoning": "concise explanation of your verdict"
@@ -83,6 +86,7 @@ export async function evaluateFaithfulness(query: string, contextChunks: SearchR
     return {
       isFaithful: false,
       confidenceScore: 0,
+      hasSufficientContext: false,
       unsupportedClaims: ['Failed to parse JSON evaluation output'],
       reasoning: 'Evaluation parser failure.'
     }
@@ -154,6 +158,7 @@ export async function evaluateActionFaithfulness(query: string, draftTitle: stri
       return {
         isFaithful: false,
         confidenceScore: 0,
+        hasSufficientContext: false,
         unsupportedClaims: ['Failed to parse JSON evaluation output'],
         reasoning: 'Action evaluation parser failure.',
       };
