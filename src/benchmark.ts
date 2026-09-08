@@ -2,20 +2,20 @@
 // VERIRAG AUTOMATED EVALUATION & BENCHMARK RUNNER
 // ============================================================================
 // Purpose:
-// 1. Programmatically iterates through all 20 test cases in data/eval-dataset.json.
-// 2. Evaluates Dense Vector Search (Baseline) vs. Hybrid RRF Search (v2) for Top-3 Recall.
+// 1. Programmatically iterates through all test cases in data/eval-dataset.json.
+// 2. Evaluates Dense Vector Search  vs. Hybrid RRF Search for Top-3 Recall.
 // 3. Tests Groq generation and Judge Gate verification on in-scope and out-of-scope queries.
 // 4. Tests Action Drafting to ensure hallucinated/unsupported actions are blocked (0% False Actions).
 // 5. Outputs a final quantitative evaluation report comparing Baseline vs. v2.
 
 import 'dotenv/config'
-import fs, { stat } from 'fs';
+import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import { vectorSearch, hybridSearch, SearchResult } from './retrieve.js';
 import { askQuestion } from './rag.js';
 import { classifyAndDraftAction } from './action.js';
-import { evaluateFaithfulness, evaluateActionFaithfulness } from './judge.js';
+import { evaluateActionFaithfulness } from './judge.js';
 
 const { Pool } = pg
 const isLocal = 

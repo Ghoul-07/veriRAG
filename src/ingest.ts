@@ -19,6 +19,7 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: isLocal ? false : { rejectUnauthorized: false },
 });
+
 const ai = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY})
 
 // configuration for sliding window chunking

@@ -7,7 +7,7 @@ import Groq from 'groq-sdk';
 import { Octokit } from '@octokit/rest';
 import * as readline from 'readline';
 import { hybridSearch, SearchResult } from './retrieve.js';
-import { evaluateFaithfulness } from './judge.js';
+import { evaluateFaithfulness , evaluateActionFaithfulness} from './judge.js';
 import { askQuestion } from './rag.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -150,8 +150,8 @@ export async function executeGatedAction(query: string): Promise<void> {
   console.log(`📄 Body:\n${draft.body}\n`);
 
   console.log('⚖️  Running Judge Gate to verify groundedness before action execution...');
-  const combinedText = `${draft.title}\n${draft.body}`;
-  const verification = await evaluateFaithfulness(query, chunks, combinedText);
+
+  const verification = await evaluateActionFaithfulness(query, draft.title, draft.body ,chunks);
 
   if (!verification.isFaithful || verification.confidenceScore < 0.7) {
     console.log('\n🛑 ACTION BLOCKED BY JUDGE GATE');

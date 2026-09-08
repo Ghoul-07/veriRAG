@@ -28,6 +28,9 @@ export async function initDatabase() {
         embedding vector(768),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- Enable RLS to block public PostgREST data exposure
+      ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
     `;
     await pool.query(createTableQuery);
 

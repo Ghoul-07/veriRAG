@@ -262,7 +262,6 @@ export async function streamAnswer(
   const sources = await hybridSearch(standaloneQuery, 6)
 
   
-
   if (sources.length === 0) {
     const emptyNotice = "I could not find any relevant context in the indexed documents.";
     onToken(emptyNotice);
