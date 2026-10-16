@@ -269,8 +269,8 @@ export async function streamAnswer(
       fullAnswer: emptyNotice,
       sources: [],
       judgeVerdict: {
-        isGrounded: false,
-        confidenceScore: 0,
+        isGrounded: true,
+        confidenceScore: 1,
         reasoning: 'No relevant chunks found in the database.',
       },
     };

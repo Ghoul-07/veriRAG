@@ -84,7 +84,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUploadSuccess 
             <span className="text-sm font-medium text-slate-200">
               Click or drag a document here (.txt, .md)
             </span>
-            <span className="text-xs text-slate-500">Auto-chunked, embedded, and synced with PostgreSQL</span>
+            <span className="text-xs text-slate-400">Auto-chunked, embedded, and synced with PostgreSQL</span>
           </div>
         )}
       </div>

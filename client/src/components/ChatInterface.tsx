@@ -292,6 +292,8 @@ export const ChatInterface: React.FC = () => {
         />
         <button
           type="submit"
+          aria-label="Send message"
+          aria-hidden="true"
           disabled={loading || !input.trim()}
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
         >

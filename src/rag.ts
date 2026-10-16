@@ -54,7 +54,7 @@ export async function askQuestion(query: string, topK=5):Promise<VerifiedRagResp
       answer: 'I cannot answer this question based on the provided documentation.',
       sources:[],
       verification:{
-        isFaithful: false,
+        isFaithful: true,
         confidenceScore: 1.0,
         hasSufficientContext: false,
         unsupportedClaims: [],
